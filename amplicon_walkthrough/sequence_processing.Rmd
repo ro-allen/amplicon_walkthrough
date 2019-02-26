@@ -1,0 +1,398 @@
+#Processing
+
+This tutorial introduces the analysis of high-throughput amplicon sequencing data using the Bioconductor pipeline [(Callahan et al. 2016a)](https://f1000research.com/articles/5-1492/v2) which uses the DADA2 framework [(Callahan et al. 2016b)](https://www.nature.com/articles/nmeth.3869#methods). DADA2 resolves amplicon sequence variants (ASVs) at the single nucleotide resolution, providing greater accuracy and reproducibility to amplicon sequencing research when compared with traditional binning of operational taxonomic units (OTUs). [External resources from the creators of this pipeline are available online.](https://benjjneb.github.io/dada2/tutorial.html)
+
+### Install and load required packages
+
+```{r}
+# packages can be installed directly from CRAN using the install.packages() function
+install.packages()
+
+# some packages are not available through CRAN and must be downloaded slightly differently
+install.packages(bioc.lite)
+
+# use the library() function to load the packages you would like to work with
+library(dada2)
+library(phyloseq)
+library(ggplot2)
+library(cowplot)
+library(knitr)
+
+```
+
+### Programme custom functions
+
+```{r}
+# ggrare plots a rarefaction curve from a phyloseq object
+
+ggrare <- function(physeq_object, step = 10, label = NULL, color = NULL, plot = TRUE, parallel = FALSE, se = TRUE) {
+  
+  x <- methods::as(phyloseq::otu_table(physeq_object), "matrix")
+  if (phyloseq::taxa_are_rows(physeq_object)) { x <- t(x) }
+  
+  ## This script is adapted from vegan `rarecurve` function
+  tot <- rowSums(x)
+  S <- rowSums(x > 0)
+  nr <- nrow(x)
+  
+  rarefun <- function(i) {
+    cat(paste("rarefying sample", rownames(x)[i]), sep = "\n")
+    n <- seq(1, tot[i], by = step)
+    if (n[length(n)] != tot[i]) {
+      n <- c(n, tot[i])
+    }
+    y <- vegan::rarefy(x[i, ,drop = FALSE], n, se = se)
+    if (nrow(y) != 1) {
+      rownames(y) <- c(".S", ".se")
+      return(data.frame(t(y), Size = n, Sample = rownames(x)[i]))
+    } else {
+      return(data.frame(.S = y[1, ], Size = n, Sample = rownames(x)[i]))
+    }
+  }
+  if (parallel) {
+    out <- parallel::mclapply(seq_len(nr), rarefun, mc.preschedule = FALSE)
+  } else {
+    out <- lapply(seq_len(nr), rarefun)
+  }
+  df <- do.call(rbind, out)
+  
+  # Get sample data
+  if (!is.null(phyloseq::sample_data(physeq_object, FALSE))) {
+    sdf <- methods::as(phyloseq::sample_data(physeq_object), "data.frame")
+    sdf$Sample <- rownames(sdf)
+    data <- merge(df, sdf, by = "Sample")
+    labels <- data.frame(x = tot, y = S, Sample = rownames(x))
+    labels <- merge(labels, sdf, by = "Sample")
+  }
+  
+  # Add, any custom-supplied plot-mapped variables
+  if ( length(color) > 1 ) {
+    data$color <- color
+    names(data)[names(data) == "color"] <- deparse(substitute(color))
+    color <- deparse(substitute(color))
+  }
+  
+  if ( length(label) > 1 ) {
+    labels$label <- label
+    names(labels)[names(labels) == "label"] <- deparse(substitute(label))
+    label <- deparse(substitute(label))
+  }
+  
+  p <- ggplot2::ggplot(data = data,
+                       ggplot2::aes_string(x = "Size",
+                                           y = ".S",
+                                           group = "Sample",
+                                           color = color))
+  
+  p <- p + ggplot2::labs(x = "Sequence Sample Size", y = "Species Richness")
+  
+  if (!is.null(label)) {
+    p <- p + ggplot2::geom_text(data = labels,
+                                ggplot2::aes_string(x = "x",
+                                                    y = "y",
+                                                    label = label,
+                                                    color = color),
+                                size = 4, hjust = 0)
+  }
+  
+  p <- p + ggplot2::geom_line()
+  if (se) { ## add standard error if available
+    p <- p +
+      ggplot2::geom_ribbon(ggplot2::aes_string(ymin = ".S - .se",
+                                               ymax = ".S + .se",
+                                               color = NULL,
+                                               fill = color),
+                           alpha = 0.2)
+  }
+  if (plot) {
+    plot(p)
+  }
+  invisible(p)
+}
+
+```
+
+### Set working directory and file paths
+
+Here we tell R where to look for the files we want to upload, and where we want R to save any output files from this tutorial. 
+
+```{r}
+# path to location of raw sequencing files
+path <- "/Users/rohanallen/Desktop/PhD/Data/amplicon_walkthrough/raw_sequences"
+
+# use the list.files() function to print all files in the path directory
+list.files(path)
+```
+
+### Identify forward and reverse paired-end read files
+Pattern parameter is used to identify consistent suffixes of file names, which indicate whether each file is a forward or reverse read file. 
+
+```{r}
+# extract first part of file names for future reference
+f.names <- as.vector(list.files(path, pattern = "_R1_001.fastq", full.names = FALSE))
+r.names <- as.vector(list.files(path, pattern = "_R2_001.fastq", full.names = FALSE))
+
+# identify forward and reverse read files
+fnFs <- sort(list.files(path, pattern = "_R1_001.fastq", full.names = TRUE))
+fnRs <- sort(list.files(path, pattern = "_R2_001.fastq", full.names = TRUE))
+```
+
+### Plot sequence quality profiles
+Sequence read quality information is contained within each fastq file. This represents the degree of certainty associated with the base-call at each position. Forward reads typically maintain an acceptable degree of base-call certainty over the full length of the sequence. In contrast, base-call certainty of reverse reads begins to decrease after approximately 230 bases and is likely to require trimming. 
+
+```{r}
+# plot quality profiles for forward and reverse reads, only the first 9 samples are selected
+qpf <- plotQualityProfile(fnFs[1:9]) #note we only choose to visualise 10 samples
+qpr <- plotQualityProfile(fnRs[1:9])
+
+# save quality profiles (optional)
+ggsave("japan_16_quality_F.jpeg", qpf, width = 20, height = 13.3, units = "cm", device = "jpeg")
+ggsave("japan_16_quality_R.jpeg", qpr, width = 20, height = 13.3, units = "cm", device = "jpeg")
+
+# display quality profiles 
+qpf
+qpr
+```
+
+### Setup directory for filtered and trimmed sequences
+The purpose of this step is to create a new directory location where filtered and trimmed sequence files can be saved after the following quality control steps. 
+
+```{r}
+# sets up new directory titled 'filtered' within the current file path
+filt_path <- file.path(path, "filtered")
+
+# sets the way we want R to save new files into the new directory
+filtFs <- file.path(filt_path, paste0(f.names, "_F_filt.fastq.gz"))
+filtRs <- file.path(filt_path, paste0(r.names, "_R_filt.fastq.gz"))
+```
+
+### Filter and trim sequences
+At this stage we remove primers from forward and reverse reads respectively, and truncate reads based on sequence quality drop off. An error estimating parameter is then used to throw out sequences which are below a certain overall quality. Note that the trim and truncate parameters *must* be adjusted manually here based on primer length and inspect of quality profiles.
+
+```{r}
+out <- filterAndTrim(fnFs, filtFs, fnRs, filtRs, truncLen=c(200,170), trimLeft=c(20,18), maxN=0, maxEE=c(2,2), truncQ=2, rm.phix=TRUE, compress=TRUE, multithread=TRUE)
+
+head(out)
+```
+
+### Learn error rates
+DADA2 relies of error estimation to resolve amplicon sequence variants. Here, the predicted error rate for each potential combination of bases is calculated and regressed against the quality score at the read position. Error rates should decrease as a function of quality score, and these plots should be investigated for major deviations. These error rates are then used downstream.
+
+```{r}
+# calculate the error model
+errF <- learnErrors(filtFs, multithread = TRUE)
+errR <- learnErrors(filtRs, multithread = TRUE)
+
+# plot errors
+plot.errF <- plotErrors(errF, nominalQ = TRUE) + theme_bw() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+plot.errR <- plotErrors(errR, nominalQ = TRUE) + theme_bw() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+ggsave("japan_16_error_F.jpeg", qpf, width = 7, height = 5.5, units = "cm", device = "jpeg")
+ggsave("japan_16_error_R.jpeg", qpr, width = 7, height = 5.5, units = "cm", device = "jpeg")
+
+# display error plots
+plot.errF
+plot.errR
+```
+
+### Dereplicate sequences
+Sequences are dereplicated, meaning that identical sequences are removed (temporarily). This reduces the computational demand when resolving amplicon sequence variants by eliminating redundant comparisons. 
+
+```{r}
+# dereplicate sequences
+derepFs <- derepFastq(filtFs, verbose = TRUE)
+derepRs <- derepFastq(filtRs, verbose = TRUE)
+
+# match names for clarity
+names(derepFs) <- f.names
+names(derepRs) <- r.names
+```
+
+### Resolve amplicon sequence variants (ASVs)
+The DADA2 algorithm is then applied to dereplicated sequences, resolving amplicon sequence variants at single nucleotide resolution for forward and reverse reads independently.
+
+```{r}
+dadaFs <- dada(derepFs, err = errF, multithread = TRUE)
+dadaRs <- dada(derepRs, err = errR, multithread = TRUE)
+```
+
+### Merge paired reads
+Merge forward and reverse reads, yielding full length sequences for the targetted amplicon region. 
+
+```{r}
+mergers <- mergePairs(dadaFs, derepFs, dadaRs, derepRs, verbose = TRUE)
+```
+
+### Generate sequence table
+Generate a sequencing table to see the number of reads assigned to each ASV across all samples. 
+
+```{r}
+seqtab <- makeSequenceTable(mergers)
+table(nchar(getSequences(seqtab)))
+```
+
+### Remove chimeras
+Chimeras are removed by searching for bimeric sequences. This is an abundance based algorithm, which searches for ASVs where each half of the sequence could be assigned to a different *more abundant* ASV. These sequences are assumed to be chimeric, as the abundance of chimeras should always be lower than the abundance of true reads. 
+
+```{r}
+seqtab.chi <- removeBimeraDenovo(seqtab, method = "consensus", multithread = TRUE, verbose = TRUE)
+```
+
+### Track sequence loss 
+Generate a table to track the loss of sequences at different stages of the pipeline. This can help identify stages of the pipeline which may have cause substantial sequence loss and may need to be revisted. 
+
+```{r}
+# function for sum of unique sequences in a dataframe
+getN <- function(x) sum(getUniques(x))
+
+# bind columns: sequence; unique sequences after dada2 (forward only); unique sequences after merging forward and reverse reads; unique sequences after chimera removal
+track <- cbind(out, sapply(dadaFs, getN), sapply(mergers, getN), rowSums(seqtab.chi))
+colnames(track) <- c("input", "filtered", "denoised", "merged", "no chim")
+rownames(track) <- f.names
+
+# print table
+print(track)
+```
+
+### Assign taxonomy
+Assign the taxonomy to ASV sequences according to your chosen reference database. SILVA release 132 is preferable for prokaryotic 16S, whilst PR2 is preferable for eukaryotic 18S. It is essential that your path is set to the location of your reference database. Note that the mean bootstrap confidence here is set to 50%, but bootstrap values can be manually extracted and inspected, and user-based decisions on desired confidence and subsequent reporting can be established. [Further reference databases formated for the DADA2 pipline are available.]()
+
+```{r}
+# assign main taxonomy against SILVA database
+silva.taxa <- assignTaxonomy(seqtab.chi, "silva_nr_v132_train_set.fa" , multithread = TRUE)
+ 
+## assign species level taxonomy against SILVA species database (optional)
+silva.taxa <- addSpecies(silva.taxa, "silva_species_assignment_v132.fa")
+```
+
+
+### Upload metadata
+Upload and inspect your metadata, which can now be associated with your sequencing data. 
+```{r}
+sd.japan.16 <- read.csv("/Users/rohanallen/Desktop/PhD/Data/amplicon_walkthrough/raw_sequences/sample_data.csv", header = T)
+head(sd.japan.16)
+```
+
+
+### Format metadata
+Formatting metadata to fit the necessary structure of the phyloseq object is performed at this stage. This ensures that the row names of the metadata table and the sequencing table are identical. 
+
+```{r}
+# create a vector for sample names
+s.vec <- as.vector(1:18)  #number should reflect your total number of samples
+s.nam <- cbind("sample_", s.vec)
+s.nam <- as.data.frame(s.nam)
+s.names <- paste0(s.nam$V1, s.nam$s.vec)
+s.names <- as.data.frame(s.names)
+
+# apply sample names to metadata
+row.names(sd.japan.16) <- s.names$s.names
+sd.japan.16 <- as.data.frame(sd.japan.16)
+
+# apply sample names to sequence table
+row.names(seqtab.chi) <- s.names$s.names
+```
+
+### Construct phyloseq object
+Construct a phyloseq object which is the main platform for downstream processing of sequencing data. 
+
+```{r}
+japan.16.phy <- phyloseq(otu_table(seqtab.chi, taxa_are_rows = F), tax_table(silva.taxa), sample_data(sd.japan.16))
+```
+
+
+### Format ASV names
+The sequence table currently displays the name of each ASV as a full sequence, making these elements messy and difficult to inspect. Full sequences can be replaced by simple numbered ASV names (e.g. "asv_1"). 
+
+```{r}
+# create vector for ASV names
+dim(seqtab.chi)
+a.vec <- as.vector(1:31738)  #number should reflect your total ASVs
+a.nam <- cbind("asv_", a.vec)
+a.nam <- as.data.frame(a.nam)
+asv.names <- paste0(a.nam$V1, a.nam$a.vec)
+asv.names <- as.data.frame(asv.names)
+
+taxa_names(japan.16.phy) <- asv.names$asv.names 
+```
+
+
+### Reformat taxonomic data
+This is an optional step, which reformats taxonomic data in a way that is easier to inspect and plot. This script adds a new column to the taxonomy table, which consists of the highest taxonomic classification in addition to the asv number (for example: *Prochlorococcus ASV_1*). 
+
+```{r}
+bc.t = t(as.data.frame(tax_table(japan.16.phy)))
+bc.t[bc.t=="k__"] <- ""
+bc.t[bc.t=="p__"] <- ""
+bc.t[bc.t=="c__"] <- ""
+bc.t[bc.t=="o__"] <- ""
+bc.t[bc.t=="f__"] <- ""
+bc.t[bc.t=="g__"] <- ""
+bc.t[bc.t=="s__"] <- ""
+bc.t[bc.t==""] <- NA
+bc.fill = na.locf(bc.t, na.rm = TRUE)
+t.bc.fill = as.data.frame(t(bc.fill))
+head(t.bc.fill)
+rnc.bc = rownames_to_column(t.bc.fill, "ASV")
+
+## Creates a column with the best classification and the ASV
+rnc.bc$taxa_ASV = paste(rnc.bc$Species,rnc.bc$ASV)
+
+## Bind this column back onto the original tax_table 
+safe.bc = as.data.frame(tax_table(japan.16.phy))
+safe.bc$taxa_ASV = paste(rnc.bc$taxa_ASV)
+View(safe.bc)
+
+# Setup object as tax_table
+bc.tax = tax_table(safe.bc)
+colnames(bc.tax) = colnames(safe.bc)
+rownames(bc.tax) = rownames(safe.bc)
+View(bc.tax)
+
+## Update phyloseq object with new table
+identical(bc.tax[1:31738,1:7], tax_table(japan.16.phy)) #should be true
+tax_table(japan.16.phy) = bc.tax
+head(tax_table(japan.16.phy))
+```
+
+
+### Calculate the number of reads remaining in each sample
+
+```{r}
+rowSums(otu_table(japan.16.phy))
+mean(rowSums(otu_table(japan.16.phy))) 
+min(rowSums(otu_table(japan.16.phy))) 
+max(rowSums(otu_table(japan.16.phy)))
+```
+
+### Exclude sequences
+Sequences which are poorly assigned, or not of interest to the study can be removed at this stage. Here, we wish to retain only sequences of bacterial of archael origin, which are not classified as chloroplasts. 
+```{r}
+dim(tax_table(japan.16.phy)) #original number of ASV
+japan.16.phy = subset_taxa(japan.16.phy, Kingdom=="Bacteria" | Kingdom=="Archaea")
+dim(tax_table(japan.16.phy)) #number of ASVs after non-bacteria/archaea removed
+japan.16.phy = subset_taxa(japan.16.phy, Order!="Chloroplast")
+dim(tax_table(japan.16.phy)) #number of ASVs after chloroplasts removed
+```
+
+###Plot rarefaction curve
+Generate a rarefaction curve to ensure that sequence coverage is sufficient to represent the microbial diversity present in the sample. Prior to generating the curve we must definte the ggrare function. 
+
+```{r}
+jap.curve.16 = ggrare(japan.16.phy, step = 1000, se = FALSE) + theme_bw()
+ggsave("japan_16s_rarefaction_curve.jpeg", jap.curve.16, width = 15, height = 7.5, units = "cm", device = "jpeg")
+```
+
+### Perform rarefaction
+Subsample sequences to an even depth, which will be the minimum sequencing depth observed in retained samples; samples with very low sequencing depth may be discarded by choice, prior to this step. It is also important to ensure that the subsampling depth provides sufficient coverage of diversity, based on inspection of the previously generated rarefaction curves. 
+```{r}
+min(rowSums(otu_table(japan.16.phy))) #1000
+set.seed(711)
+japan.16.rare = rarefy_even_depth(japan.16.phy, sample.size = 18708, trimOTUs = TRUE) 
+dim(tax_table(japan.16.rare))
+
+saveRDS(japan.16.phy, file = "japan.16.phy.RDS")
+```
+
