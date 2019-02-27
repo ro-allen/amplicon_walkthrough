@@ -1,1 +1,208 @@
 #Exploration
+
+### Set functions
+```{r}
+# pre-defined plotting themes for consistency
+theme_ro <- function(){
+  theme_bw()+
+    theme(legend.position = "none",
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          strip.background = element_blank(),
+          axis.text.x = element_text(size = 10),
+          axis.text.y = element_text(size = 10),
+          axis.title.x = element_text(size = 12), 
+          axis.title.y = element_text(size = 12))
+}
+
+theme_ro_legend <- function(){
+  theme_bw()+
+    theme(panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          strip.background = element_blank(),
+          axis.text.x = element_text(size = 10),
+          axis.text.y = element_text(size = 10),
+          axis.title.x = element_text(size = 12), 
+          axis.title.y = element_text(size = 12))
+}
+
+split_proteo_silva <- function(physeq) {
+  one = as.data.frame(tax_table(physeq))
+  two = as.data.frame(lapply(one, as.character), stringsAsFactors = F)
+  two$Phylum[two$Phylum=="Proteobacteria"] = two$Class[two$Phylum=="Proteobacteria"]
+  two[] = lapply(two, factor)
+  three = tax_table(two)
+  rownames(three) = rownames(tax_table(physeq))
+  colnames(three) = colnames(tax_table(physeq))
+  tax_table(physeq) = three
+  return(physeq)
+}
+```
+
+### Read RDS 
+Read RDS file if necessary
+```{r}
+japan.16.rare <- readRDS("amplicon_walkthrough.RDS")
+```
+
+### Phylum-level barplot
+Don't forget to split proteobacteria! Use same palettes as the full japan data set... much easier and shows things clearly. 
+```{r}
+# split proteobacteria 
+japan.16.rare <- split_proteo_silva(japan.16.rare) #slow (5 mins)
+
+# transform data to proportions
+japan.16.rare.prop <- transform_sample_counts(japan.16.rare, function(x) x/sum(x))
+
+# merge ASVs which belong to the same Phylum
+japan.16.rare.prop.glom <- tax_glom(japan.16.rare.prop, taxrank="Phylum")
+
+# print the total read count for each phylum
+rev(sort(rowSums(t(otu_table(japan.16.rare.prop.glom)))))
+tax_table(japan.16.rare.prop.glom) #727 onwards gets merged
+
+# Melt rare phyla into 'Other' category (zzOther written to force to bottom of phylum order, but plot legend labels can be manipulated manually)
+tax_table(japan.16.rare.prop.glom)[tax_table(japan.16.rare.prop.glom)=="Thaumarchaeota"]<-"zzOther"
+tax_table(japan.16.rare.prop.glom)[tax_table(japan.16.rare.prop.glom)=="Fusobacteria"]<-"zzOther"
+tax_table(japan.16.rare.prop.glom)[tax_table(japan.16.rare.prop.glom)=="Epsilonbacteraeota"]<-"zzOther"
+tax_table(japan.16.rare.prop.glom)[tax_table(japan.16.rare.prop.glom)=="Deinococcus-Thermus"]<-"zzOther"
+tax_table(japan.16.rare.prop.glom)[tax_table(japan.16.rare.prop.glom)=="Acidobacteria"]<-"zzOther"
+tax_table(japan.16.rare.prop.glom)[tax_table(japan.16.rare.prop.glom)=="Calditrichaeota"]<-"zzOther"
+tax_table(japan.16.rare.prop.glom)[tax_table(japan.16.rare.prop.glom)=="Tenericutes"]<-"zzOther"
+tax_table(japan.16.rare.prop.glom)[tax_table(japan.16.rare.prop.glom)=="Planctomycetes"]<-"zzOther"
+tax_table(japan.16.rare.prop.glom)[tax_table(japan.16.rare.prop.glom)=="Chloroflexi"]<-"zzOther"
+tax_table(japan.16.rare.prop.glom)[tax_table(japan.16.rare.prop.glom)=="Kiritimatiellaeota"]<-"zzOther"
+tax_table(japan.16.rare.prop.glom)[tax_table(japan.16.rare.prop.glom)=="Fibrobacteres"]<-"zzOther"
+tax_table(japan.16.rare.prop.glom)[tax_table(japan.16.rare.prop.glom)=="Modulibacteria"]<-"zzOther"
+tax_table(japan.16.rare.prop.glom)[tax_table(japan.16.rare.prop.glom)=="Euryarchaeota"]<-"zzOther"
+tax_table(japan.16.rare.prop.glom)[tax_table(japan.16.rare.prop.glom)=="Firmicutes"]<-"zzOther"
+tax_table(japan.16.rare.prop.glom)[tax_table(japan.16.rare.prop.glom)=="Cloacimonetes"]<-"zzOther"
+tax_table(japan.16.rare.prop.glom)[tax_table(japan.16.rare.prop.glom)=="Latescibacteria"]<-"zzOther"
+tax_table(japan.16.rare.prop.glom)[tax_table(japan.16.rare.prop.glom)=="Nitrospinae"]<-"zzOther"
+tax_table(japan.16.rare.prop.glom)[tax_table(japan.16.rare.prop.glom)=="Dependentiae"]<-"zzOther"
+tax_table(japan.16.rare.prop.glom)[tax_table(japan.16.rare.prop.glom)=="Elusimicrobia"]<-"zzOther"
+tax_table(japan.16.rare.prop.glom)[tax_table(japan.16.rare.prop.glom)=="Chlamydiae"]<-"zzOther"
+tax_table(japan.16.rare.prop.glom)[tax_table(japan.16.rare.prop.glom)=="Deferribacteres"]<-"zzOther"
+tax_table(japan.16.rare.prop.glom)[tax_table(japan.16.rare.prop.glom)=="Dadabacteria"]<-"zzOther"
+tax_table(japan.16.rare.prop.glom)[tax_table(japan.16.rare.prop.glom)=="Nitrospirae"]<-"zzOther"
+tax_table(japan.16.rare.prop.glom)[tax_table(japan.16.rare.prop.glom)=="Gemmatimonadetes"]<-"zzOther"
+tax_table(japan.16.rare.prop.glom)[tax_table(japan.16.rare.prop.glom)=="Spirochaetes"]<-"zzOther"
+tax_table(japan.16.rare.prop.glom)[tax_table(japan.16.rare.prop.glom)=="Omnitrophicaeota"]<-"zzOther"
+tax_table(japan.16.rare.prop.glom)[tax_table(japan.16.rare.prop.glom)=="Hydrogenedentes"]<-"zzOther"
+tax_table(japan.16.rare.prop.glom)[tax_table(japan.16.rare.prop.glom)=="Zetaproteobacteria"]<-"zzOther"
+tax_table(japan.16.rare.prop.glom)[tax_table(japan.16.rare.prop.glom)=="Magnetococcia"]<-"zzOther"
+tax_table(japan.16.rare.prop.glom)[tax_table(japan.16.rare.prop.glom)=="Aquificae"]<-"zzOther"
+tax_table(japan.16.rare.prop.glom)[tax_table(japan.16.rare.prop.glom)=="Nanoarchaeaeota"]<-"zzOther"
+tax_table(japan.16.rare.prop.glom)[tax_table(japan.16.rare.prop.glom)=="Archaea"]<-"Bacteria" #getting rid of duplicate 'other'
+
+# merge at the phylum level a second time to consolidate zzOthers
+japan.16.rare.prop.glom <- tax_glom(japan.16.rare.prop.glom, taxrank="Phylum")
+
+# generate palette for plot
+palette.16.revised = c( "grey", "#d73027", "#e0f3f8", "#f46d43","#abd9e9", "#fdae61", "#74add1","#ffffbf", "#4575b4", "#fee090")
+
+# plot stacked bar chart
+jap.bar.16 = plot_bar(japan.16.rare.prop.glom, fill = "Phylum", x = "library_name") + facet_grid(. ~ condition, scales = "free_x") +
+  scale_y_continuous(expand = c(0,0),limits = c(0,1), labels = c("0%","25%", "50%", "75%", "100%")) +
+  theme(legend.text=element_text(size=10), legend.title=element_text(size=12), legend.background = element_rect(color="grey50", size=.3, linetype=1), strip.background = element_blank()) +
+  scale_fill_manual(values = rev(palette.16.revised), labels = c("Actinobactera", "Alphaproteobacteria", "Bacteroidetes", "Cyanobacteria", "Deltaproteobacteria", "Gammaproteobacteria", "Lentisphaerae", "Patescibacteria", "Verrucomicrobia", "Other")) +
+  scale_x_discrete(expand = c(0,0)) +
+  ylab("Relative Abundance") +
+  xlab("") +
+  geom_bar(stat = "identity", width = 1, size = 0.2, colour = "gray20") +
+  theme_ro_legend() +
+  theme(axis.text.x = element_text(size = 8, hjust = 0, vjust = 0.5, angle = 270)) +
+  theme(axis.text.y = element_text(size = 8, hjust = 0), axis.title.y = element_text(size = 10)) +
+  theme(legend.text = element_text(size=8), legend.title = element_text(size = 10)) 
+
+```
+
+### ASV heatmap
+```{r}
+# trim 20 most abundant taxa
+japan.16.heat <- sort(taxa_sums(japan.16.rare.prop), TRUE)[1:20]
+japan.16.heat <- prune_taxa(names(japan.16.heat), japan.16.rare.prop)
+summary(otu_table(japan.16.heat))
+
+# change zero values to NA
+japan.16.heat.na <- phyloseq(replace(otu_table(japan.16.heat), otu_table(japan.16.heat) == 0, NA), tax_table(tax_table(japan.16.heat)), sample_data(sample_data(japan.16.heat)))
+
+# plot
+heat.j.16 <- plot_heatmap(japan.16.heat, "NMDS", "bray", taxa.label = "taxa_ASV", sample.label = "library_name", sample.order = "library_number") +
+  facet_grid(. ~ condition, scales = "free_x", labeller = "label_parsed") +
+  theme_classic() +
+  theme(line = element_line(size = .3), rect = element_rect(size = .3), axis.line = element_line(size = .3), strip.background = element_blank(), strip.text = element_text(size = 12), axis.text.x = element_text(size = 10, angle = 270, hjust = 0, colour = "black"), axis.text.y = element_text(size = 7, colour = "black")) +
+  scale_fill_gradient2(midpoint = 0.085, low = "#FEFFEB", mid = "indianred1", high = "black", na.value = "White", limits=c(0,0.16), breaks = c(0, 0.05, 0.1, 0.15), labels=c("0%", "5%", "10%", "15%"), guide = "colourbar") +
+  theme_ro_legend() +
+  theme(axis.text.x = element_text(size = 8, hjust = 0, angle = 270)) +
+  theme(axis.text.y = element_text(size = 8)) +
+  theme(axis.text.x = element_text(vjust = 0.5)) +
+  theme(strip.text = element_text(size = 12)) +
+  xlab("") +
+  ylab("")
+
+heat.j.16
+```
+
+### Ordination
+```{r}
+o.jap.16 <- ordinate(japan.16.rare, method = "NMDS", distance = "bray")
+jap.nmds.16 <- plot_ordination(japan.16.rare, o.jap.16, type = "sites", color = "condition") + 
+  scale_colour_manual(values = c("firebrick1","dodgerblue2")) +
+  theme_bw() + 
+  theme_ro() +
+  theme(axis.text.y = element_text(size = 8, hjust = 0), axis.title.y = element_text(size = 10)) +
+  theme(axis.text.x = element_text(size = 8, hjust = 0), axis.title.x = element_text(size = 10)) +
+  annotate("text", x = Inf, y = -Inf, label = "stress = XX",  hjust = 1.2, vjust = -1, size = 3) 
+jap.nmds.16
+```
+
+### PERMANOVA
+```{r}
+adonis.meta.16 <- as(sample_data(japan.16.rare), "data.frame")
+jap.dist.16 <- phyloseq::distance(japan.16.rare, "bray")
+adonis(jap.dist.16 ~ condition, data = adonis.meta.16, permutations = 999)
+```
+
+
+### Alpha diversity
+Use this as an opportunity to consider data visualisation conversations. Explain use of Chao1. 
+```{r}
+alpha.16 <- estimate_richness(japan.16.rare)
+alpha.16 <- cbind(alpha.16, sample_data(japan.16.rare))
+
+chao.16.plot = ggplot(alpha.16, aes(x = condition, y = Chao1, shape = condition, fill = condition)) + 
+  stat_summary(fun.data = mean_sdl, fun.args = list(mult = 1), geom="errorbar", color="black", position=position_dodge(width=0.9), width=0.1, size= 0.25) +
+  stat_summary(fun.y = mean, fun.args = list(mult = 1), geom="bar", color="black", position=position_dodge(preserve = "total"), size = 0.25) +
+  scale_shape_manual(values = c(16,1)) + 
+  scale_fill_manual(values = c("firebrick1", "Dodgerblue2")) + 
+  theme_ro() +
+  theme(axis.text.x = element_text(size = 8, hjust = 0, angle = 270)) +
+  theme(axis.text.y = element_text(size = 8), axis.title.y = element_text(size = 10)) +
+  theme(axis.text.x = element_text(vjust = 0.5)) +
+  xlab("") + 
+  ylab("Chao1") + 
+  scale_y_continuous(expand = c(0,0), limits = c(0,650)) +
+  theme_ro()
+
+simp.16.plot = ggplot(alpha.16, aes(x = condition, y = Simpson, shape = condition, fill = condition)) + 
+  stat_summary(fun.data = mean_sdl, fun.args = list(mult = 1), geom="errorbar", color="black", position=position_dodge(width=0.9), width=0.1, size= 0.25) +
+  stat_summary(fun.y = mean, fun.args = list(mult = 1), geom="bar", color="black", position=position_dodge(preserve = "total"), size = 0.25) +
+  scale_shape_manual(values = c(16,1)) + 
+  scale_fill_manual(values = c("firebrick1", "Dodgerblue2")) + 
+  theme_ro() +
+  theme(axis.text.x = element_text(size = 8, hjust = 0, angle = 270)) +
+  theme(axis.text.y = element_text(size = 8), axis.title.y = element_text(size = 10)) +
+  theme(axis.text.x = element_text(vjust = 0.5)) +
+  xlab("") + 
+  ylab("Chao1") + 
+  scale_y_continuous(expand = c(0,0), limits = c(0,1.1)) +
+  theme_ro()
+```
+
+### ANOVA 
+```{r}
+summary(aov(alpha.16$Chao1 ~ alpha.16$condition))
+summary(aov(alpha.16$Simpson ~ alpha.16$condition))
+```
+
